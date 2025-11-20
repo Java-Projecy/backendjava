@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/data/candidates")
+@RequestMapping("/data/candidates")
 public class CandidatoController {
 
     private final CandidatoService service;

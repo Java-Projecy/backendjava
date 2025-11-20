@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/data/voters")
+@RequestMapping("/data/voters")
 
 public class VotanteController {
 

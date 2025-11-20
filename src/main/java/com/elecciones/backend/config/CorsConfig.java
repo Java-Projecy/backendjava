@@ -12,11 +12,11 @@ public class CorsConfig {
         return new WebMvcConfigurer() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
-                registry.addMapping("/api/**")
+                registry.addMapping("/**")  // ← Aplica a TODAS las rutas
                         .allowedOrigins(
                             "http://localhost:5173",
                             "http://localhost:3000",
-                            "fn-onpe-production.up.railway.app"  // ← Agrega tu URL de Railway
+                            "fn-onpe-production.up.railway.app"
                         )
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")

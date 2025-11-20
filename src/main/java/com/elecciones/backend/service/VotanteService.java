@@ -26,7 +26,8 @@ public class VotanteService {
     }
 
     public Optional<Votante> getByDni(String dni) {
-        return Optional.ofNullable(votanteRepository.findByDni(dni));
+        Votante votante = votanteRepository.findByDni(dni);
+        return Optional.ofNullable(votante);
     }
 
     public Votante save(Votante votante) {
