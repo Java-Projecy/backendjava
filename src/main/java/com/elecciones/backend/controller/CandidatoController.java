@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/candidatos")
+@RequestMapping("/api/data/candidates")
 @CrossOrigin(origins = "*")
 public class CandidatoController {
 
