@@ -10,7 +10,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/data/candidates")
-@CrossOrigin(origins = "*")
 public class CandidatoController {
 
     private final CandidatoService service;
@@ -40,4 +39,6 @@ public class CandidatoController {
     public void delete(@PathVariable UUID id) {
         service.delete(id);
     }
+    
 }
+

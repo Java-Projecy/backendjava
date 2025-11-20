@@ -10,7 +10,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/data/regional-votes")
-@CrossOrigin(origins = "*")
+
 public class VotoRegionalController {
 
     private final VotoRegionalService service;
