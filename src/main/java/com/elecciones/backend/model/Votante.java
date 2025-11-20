@@ -1,22 +1,19 @@
 package com.elecciones.backend.model;
-
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import lombok.Builder;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
 @Table(name = "votantes")
-@Getter
-@Setter
+@Getter @Setter
 public class Votante {
 
-    @Id
-    @GeneratedValue
+    @Id @GeneratedValue
     private UUID id;
 
     @Column(unique = true, nullable = false, length = 8)
@@ -31,16 +28,17 @@ public class Votante {
     @Column(name = "apellido_materno", nullable = false)
     private String apellido_materno;
 
-    // Columna generada en la DB → no se inserta ni actualiza desde Java
+    // Columna generada automáticamente en la DB
     @Column(name = "nombre_completo", insertable = false, updatable = false)
     private String nombre_completo;
 
-    private LocalDate fecha_nacimiento;
-    private Integer edad;
-
     @Column(nullable = false)
     private String departamento;
+    
+    @Column(nullable = false)
     private String provincia;
+    
+    @Column(nullable = false)
     private String distrito;
 
     private String direccion;
@@ -50,25 +48,15 @@ public class Votante {
     private String telefono;
     private String email;
 
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "varchar(20) default 'Activo'")
     private String estado = "Activo";
 
-    @Builder.Default
-    @Column(name = "created_at", nullable = false)
-    private LocalDateTime created_at = LocalDateTime.now();
+    // ¡¡ESTO ES LO QUE ARREGLA EL 500!!
+    @Column(name = "created_at", insertable = false, updatable = false)
+    @CreationTimestamp
+    private LocalDateTime created_at;
 
-    @Builder.Default
-    @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updated_at = LocalDateTime.now();
-
-    @PrePersist
-    protected void onCreate() {
-        created_at = LocalDateTime.now();
-        updated_at = LocalDateTime.now();
-    }
-
-    @PreUpdate
-    protected void onUpdate() {
-        updated_at = LocalDateTime.now();
-    }
+    @Column(name = "updated_at", insertable = false, updatable = false)
+    @UpdateTimestamp
+    private LocalDateTime updated_at;
 }
