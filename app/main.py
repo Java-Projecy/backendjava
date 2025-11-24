@@ -2,20 +2,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
-from app.routes import candidatos, votantes, votos, estadisticas
+from app.routes import candidatos, votantes, votos, estadisticas, upload
 
 settings = get_settings()
 
 app = FastAPI(
     title="Backend Electoral ONPE",
-    description="API Backend Electoral con Supabase",
-    version="2.0.0"
+    description="API Backend Electoral con Supabase y Detección Automática de CSV",
+    version="2.1.0"
 )
 
-# ✅ CORS MEJORADO
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.get_cors_origins(),  # ← Usar el método
+    allow_origins=settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -28,12 +28,18 @@ app.include_router(candidatos.router, prefix="/api/candidatos", tags=["Candidato
 app.include_router(votantes.router, prefix="/api/votantes", tags=["Votantes"])
 app.include_router(votos.router, prefix="/api/votos", tags=["Votos"])
 app.include_router(estadisticas.router, prefix="/api/estadisticas", tags=["Estadísticas"])
+app.include_router(upload.router, prefix="/api/upload", tags=["Upload CSV"])  # ← NUEVA RUTA
 
 @app.get("/")
 async def root():
     return {
         "message": "Backend Electoral ONPE API",
-        "version": "2.0.0",
+        "version": "2.1.0",
+        "features": [
+            "Detección automática de tipo de elección en CSV",
+            "Carga a tablas temporales",
+            "Limpieza inteligente de datos"
+        ],
         "docs": "/docs",
         "cors_origins": settings.get_cors_origins()
     }
@@ -53,5 +59,9 @@ async def health_check():
     return {
         "status": status,
         "supabase": supabase_status,
-        "cors_enabled": True
+        "cors_enabled": True,
+        "features": {
+            "csv_upload": True,
+            "auto_detection": True
+        }
     }
