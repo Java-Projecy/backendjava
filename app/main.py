@@ -31,8 +31,9 @@ app.include_router(estadisticas.router, prefix="/api/estadisticas", tags=["Estad
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload CSV"])
 app.include_router(train.router, prefix="/api/train", tags=["ML Training"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
-app.include_router(fraud.router, prefix="/api", tags=["Fraud Detection"])  # ← NUEVA RUTA
 
+# ← ESTA ES LA LÍNEA MÁGICA (cámbiala)
+app.include_router(fraud.router, prefix="/api/upload", tags=["Limpieza de Datos"])
 @app.get("/")
 async def root():
     return {

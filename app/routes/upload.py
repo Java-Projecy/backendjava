@@ -252,10 +252,27 @@ async def get_batch_data(batch_id: str, tipo: str) -> Dict:
     return {"success": True, "data": result.data, "total": len(result.data)}
 
 
+# app/routes/upload.py - REEMPLAZAR el endpoint existente
+
 @router.post("/batch/{batch_id}/move-to-final")
 async def move_batch_to_final(batch_id: str, replace_all: bool = False) -> Dict:
+    """
+    ✅ MIGRA DATOS LIMPIOS de tablas temporales a tablas finales
+    
+    Proceso:
+    1. Lee datos limpios de datos_temp_{tipo}
+    2. Crea/encuentra votantes en 'votantes'
+    3. Crea/encuentra candidatos en 'candidatos'
+    4. Inserta votos en votos_{tipo} con UUIDs correctos
+    """
     try:
-        batch_info = supabase_client.table("log_limpieza_datos").select("*").eq("batch_id", batch_id).single().execute()
+        # 1️⃣ Obtener info del batch
+        batch_info = supabase_client.table("log_limpieza_datos")\
+            .select("*")\
+            .eq("batch_id", batch_id)\
+            .single()\
+            .execute()
+        
         if not batch_info.data:
             raise HTTPException(status_code=404, detail="Batch no encontrado")
         
@@ -263,96 +280,211 @@ async def move_batch_to_final(batch_id: str, replace_all: bool = False) -> Dict:
         tabla_temporal = f"datos_temp_{tipo_eleccion}es"
         tabla_votos_final = f"votos_{tipo_eleccion}es"
         
-        datos_temp = supabase_client.table(tabla_temporal).select("*").eq("batch_id", batch_id).eq("estado_registro", "pendiente").execute()
+        print(f"📦 Migrando batch {batch_id} → {tipo_eleccion}")
+        
+        # 2️⃣ Obtener datos LIMPIOS (estado='pendiente' o 'limpio')
+        datos_temp = supabase_client.table(tabla_temporal)\
+            .select("*")\
+            .eq("batch_id", batch_id)\
+            .in_("estado_registro", ["pendiente", "limpio"])\
+            .execute()
+        
         if not datos_temp.data:
-            return {"success": False, "message": "No hay registros pendientes"}
+            return {
+                "success": False, 
+                "message": "No hay registros limpios para migrar"
+            }
         
+        print(f"✅ Registros a migrar: {len(datos_temp.data)}")
+        
+        # 3️⃣ Opcional: Limpiar tabla final si replace_all=True
         if replace_all:
-            supabase_client.table(tabla_votos_final).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            print("🗑️ Limpiando tabla final...")
+            supabase_client.table(tabla_votos_final)\
+                .delete()\
+                .neq("id", "00000000-0000-0000-0000-000000000000")\
+                .execute()
         
-        votantes_creados = candidatos_creados = votos_registrados = 0
+        # 4️⃣ PROCESAR CADA REGISTRO
+        votantes_creados = 0
+        candidatos_creados = 0
+        votos_registrados = 0
+        errores = []
         
-        for registro in datos_temp.data:
+        for idx, registro in enumerate(datos_temp.data, 1):
             try:
+                print(f"\n📝 Procesando {idx}/{len(datos_temp.data)}")
+                
+                # ==========================================
+                # A. CREAR/OBTENER VOTANTE
+                # ==========================================
                 dni = registro['dni']
-                votante_existe = supabase_client.table("votantes").select("id").eq("dni", dni).execute()
+                if not dni or len(dni) != 8:
+                    errores.append(f"DNI inválido: {dni}")
+                    continue
+                
+                # Buscar votante existente
+                votante_existe = supabase_client.table("votantes")\
+                    .select("id")\
+                    .eq("dni", dni)\
+                    .execute()
                 
                 if votante_existe.data:
                     votante_id = votante_existe.data[0]['id']
+                    print(f"   ✓ Votante encontrado: {votante_id}")
                 else:
+                    # Crear nuevo votante
                     nombre_partes = registro['nombre_completo'].split()
                     votante_nuevo = supabase_client.table("votantes").insert({
                         "dni": dni,
                         "nombres": nombre_partes[0] if len(nombre_partes) > 0 else "Sin nombre",
                         "apellido_paterno": nombre_partes[1] if len(nombre_partes) > 1 else "Sin apellido",
                         "apellido_materno": nombre_partes[2] if len(nombre_partes) > 2 else "",
-                        "departamento": registro['departamento'],
-                        "provincia": registro['provincia'],
-                        "distrito": registro['distrito']
+                        "departamento": registro.get('departamento', 'LIMA'),
+                        "provincia": registro.get('provincia', 'LIMA'),
+                        "distrito": registro.get('distrito', 'LIMA'),
+                        "direccion": registro.get('direccion'),
+                        "telefono": registro.get('telefono'),
+                        "email": registro.get('email'),
+                        "estado": "Activo"
                     }).execute()
+                    
                     votante_id = votante_nuevo.data[0]['id']
                     votantes_creados += 1
+                    print(f"   ✓ Votante creado: {votante_id}")
                 
-                candidato_existe = supabase_client.table("candidatos") \
-                    .select("id") \
-                    .eq("nombre", registro['candidato_nombre']) \
-                    .eq("partido", registro['candidato_partido']) \
-                    .eq("tipo_eleccion", tipo_eleccion) \
-                    .execute()
-                
-                if candidato_existe.data:
-                    candidato_id = candidato_existe.data[0]['id']
+                # ==========================================
+                # B. OBTENER CANDIDATO POR UUID (en candidato_nombre o candidato_id)
+                # ==========================================
+                candidato_id = None
+                candidato_uuid_raw = None
+
+                # Buscar el UUID en cualquiera de estos campos (tu CSV lo pone en candidato_nombre)
+                for campo in ['candidato_id', 'candidato_nombre']:
+                    if campo in registro and registro[campo]:
+                        valor = str(registro[campo]).strip()
+                        if len(valor) >= 30 and '-' in valor:  # parece UUID
+                            candidato_uuid_raw = valor
+                            break
+
+                if candidato_uuid_raw:
+                    # Normalizar a minúsculas (Supabase guarda UUIDs en minúsculas)
+                    candidato_uuid = candidato_uuid_raw.lower()
+                    result = supabase_client.table("candidatos")\
+                        .select("id")\
+                        .eq("id", candidato_uuid)\
+                        .single()\
+                        .execute()
+                    
+                    if result.data:
+                        candidato_id = result.data['id']
+                        print(f"   CANDIDATO ENCONTRADO POR UUID: {candidato_id}")
+                    else:
+                        print(f"   UUID no encontrado en candidatos: {candidato_uuid_raw}")
                 else:
-                    candidato_nuevo = supabase_client.table("candidatos").insert({
-                        "nombre": registro['candidato_nombre'],
-                        "partido": registro['candidato_partido'],
-                        "tipo_eleccion": tipo_eleccion,
-                        "propuestas": []
-                    }).execute()
-                    candidato_id = candidato_nuevo.data[0]['id']
-                    candidatos_creados += 1
+                    # Solo si NO hay UUID → buscar por nombre + partido (fallback)
+                    nombre = registro.get('candidato_nombre', '').strip()
+                    partido = registro.get('candidato_partido', 'SIN PARTIDO').strip().upper()
+                    
+                    if nombre and nombre.upper() not in ['NO-ID', 'NULO', 'SIN CANDIDATO']:
+                        result = supabase_client.table("candidatos")\
+                            .select("id")\
+                            .eq("nombre", nombre)\
+                            .eq("partido", partido)\
+                            .eq("tipo_eleccion", tipo_eleccion)\
+                            .single()\
+                            .execute()
+                        
+                        if result.data:
+                            candidato_id = result.data[0]['id']
+                            print(f"   Candidato encontrado por nombre: {nombre}")
+                        else:
+                            print(f"   CANDIDATO NO ENCONTRADO → VOTO SALTADO: {nombre} ({partido})")
+                    else:
+                        print("   Voto en blanco o sin candidato")
+
+                if not candidato_id:
+                    errores.append(f"Voto saltado - candidato no encontrado: {candidato_uuid_raw or registro.get('candidato_nombre')}")
+                    continue
                 
+                # ==========================================
+                # C. INSERTAR VOTO (si no existe ya)
+                # ==========================================
                 if not replace_all:
-                    voto_existe = supabase_client.table(tabla_votos_final).select("id").eq("dni_votante", dni).execute()
+                    voto_existe = supabase_client.table(tabla_votos_final)\
+                        .select("id")\
+                        .eq("dni_votante", dni)\
+                        .execute()
+                    
                     if voto_existe.data:
+                        print(f"   ⚠️ Voto ya existe, saltando...")
                         continue
                 
+                # Insertar voto con UUIDs correctos
                 supabase_client.table(tabla_votos_final).insert({
-                    "votante_id": votante_id,
-                    "candidato_id": candidato_id,
+                    "votante_id": votante_id,      # ✅ UUID
+                    "candidato_id": candidato_id,  # ✅ UUID
                     "dni_votante": dni,
-                    "departamento": registro['departamento'],
-                    "provincia": registro['provincia'],
-                    "distrito": registro['distrito'],
-                    "fecha_voto": registro['fecha_voto']
+                    "departamento": registro.get('departamento', 'LIMA'),
+                    "provincia": registro.get('provincia', 'LIMA'),
+                    "distrito": registro.get('distrito', 'LIMA'),
+                    "fecha_voto": registro.get('fecha_voto', datetime.utcnow().isoformat())
                 }).execute()
                 
                 votos_registrados += 1
+                print(f"   ✅ Voto registrado")
                 
-                supabase_client.table(tabla_temporal) \
-                    .update({"estado_registro": "procesado"}) \
-                    .eq("id", registro['id']) \
+                # Marcar como procesado en tabla temporal
+                supabase_client.table(tabla_temporal)\
+                    .update({"estado_registro": "procesado"})\
+                    .eq("id", registro['id'])\
                     .execute()
                 
             except Exception as e:
-                print(f"Error procesando registro: {str(e)}")
+                error_msg = f"Error en registro {idx}: {str(e)}"
+                print(f"   ❌ {error_msg}")
+                errores.append(error_msg)
                 continue
         
-        supabase_client.table("log_limpieza_datos") \
-            .update({"estado": "procesado", "fecha_fin": datetime.utcnow().isoformat()}) \
-            .eq("batch_id", batch_id) \
+        # 5️⃣ Actualizar estado del batch
+        supabase_client.table("log_limpieza_datos")\
+            .update({
+                "estado": "procesado",
+                "fecha_fin": datetime.utcnow().isoformat(),
+                "detalles": {
+                    "votantes_creados": votantes_creados,
+                    "candidatos_creados": candidatos_creados,
+                    "votos_registrados": votos_registrados,
+                    "errores": len(errores)
+                }
+            })\
+            .eq("batch_id", batch_id)\
             .execute()
+        
+        print("\n" + "="*60)
+        print(f"✅ MIGRACIÓN COMPLETADA")
+        print(f"   📊 Votantes creados: {votantes_creados}")
+        print(f"   📊 Candidatos creados: {candidatos_creados}")
+        print(f"   📊 Votos registrados: {votos_registrados}")
+        print(f"   ⚠️ Errores: {len(errores)}")
+        print("="*60)
         
         return {
             "success": True,
-            "message": f"Datos movidos exitosamente",
+            "message": f"✅ Datos migrados exitosamente a {tabla_votos_final}",
             "estadisticas": {
                 "votantes_creados": votantes_creados,
                 "candidatos_creados": candidatos_creados,
                 "votos_registrados": votos_registrados,
-                "total_procesado": len(datos_temp.data)
+                "total_procesado": len(datos_temp.data),
+                "errores": len(errores),
+                "errores_detalle": errores[:10] if errores else []
             }
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error en migración: {str(e)}")
