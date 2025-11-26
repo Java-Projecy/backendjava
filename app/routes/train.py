@@ -108,11 +108,11 @@ async def obtener_modelos_activos():
         modelos = {}
         
         for tipo in ['presidencial', 'regional', 'distrital']:
-            # Buscar modelo más reciente para este tipo
+            # ✅ CORRECCIÓN: Usar las columnas correctas de la base de datos
             result = supabase_client.table("ml_models")\
                 .select("*")\
-                .ilike("model_name", f"%{tipo}%")\
-                .eq("is_active", True)\
+                .eq("tipo_eleccion", tipo)\
+                .eq("activo", True)\
                 .order("created_at", desc=True)\
                 .limit(1)\
                 .execute()
@@ -120,37 +120,31 @@ async def obtener_modelos_activos():
             if result.data and len(result.data) > 0:
                 modelo = result.data[0]
                 
-                # Obtener métricas asociadas
-                metrics_result = supabase_client.table("model_metrics")\
-                    .select("*")\
-                    .eq("model_id", modelo['id'])\
-                    .order("recorded_at", desc=True)\
-                    .limit(1)\
-                    .execute()
-                
-                metrics = metrics_result.data[0] if metrics_result.data else {}
+                # Parsear métricas (están en formato JSONB)
+                metricas_json = modelo.get('metricas', {})
                 
                 modelos[tipo] = {
                     "model_id": modelo['id'],
-                    "model_name": modelo['model_name'],
-                    "algorithm": modelo['algorithm'],
+                    "model_name": modelo.get('model_name'),
+                    "algoritmo": modelo.get('algoritmo'),
                     "version": modelo.get('version'),
-                    "created_at": modelo['created_at'],
-                    "training_data_size": modelo.get('training_data_size'),
-                    "metrics": {
-                        "accuracy": metrics.get('accuracy'),
-                        "precision": metrics.get('precision_score'),
-                        "recall": metrics.get('recall'),
-                        "f1_score": metrics.get('f1_score')
-                    } if metrics else None
+                    "created_at": modelo.get('created_at'),
+                    "fecha_entrenamiento": modelo.get('fecha_entrenamiento'),
+                    "ruta_modelo": modelo.get('ruta_modelo'),
+                    "metricas": {
+                        "accuracy": metricas_json.get('accuracy'),
+                        "precision": metricas_json.get('precision'),
+                        "recall": metricas_json.get('recall'),
+                        "f1_score": metricas_json.get('f1_score')
+                    } if metricas_json else None,
+                    "feature_importance": modelo.get('feature_importance', {})
                 }
             else:
                 modelos[tipo] = None  # No hay modelo para este tipo
         
         return {
             "success": True,
-            "modelos": modelos,
-            "timestamp": supabase_client.table("ml_models").select("created_at").order("created_at", desc=True).limit(1).execute().data[0]['created_at'] if supabase_client.table("ml_models").select("created_at").execute().data else None
+            "modelos": modelos
         }
         
     except Exception as e:
@@ -177,11 +171,11 @@ async def obtener_predicciones(tipo_eleccion: str):
         raise HTTPException(400, "Tipo de elección inválido")
     
     try:
-        # Buscar modelo más reciente para este tipo
+        # ✅ CORRECCIÓN: Usar las columnas correctas
         result = supabase_client.table("ml_models")\
             .select("*")\
-            .ilike("model_name", f"%{tipo_eleccion}%")\
-            .eq("is_active", True)\
+            .eq("tipo_eleccion", tipo_eleccion)\
+            .eq("activo", True)\
             .order("created_at", desc=True)\
             .limit(1)\
             .execute()
@@ -193,46 +187,30 @@ async def obtener_predicciones(tipo_eleccion: str):
             )
         
         modelo = result.data[0]
-        
-        # Obtener métricas
-        metrics_result = supabase_client.table("model_metrics")\
-            .select("*")\
-            .eq("model_id", modelo['id'])\
-            .order("recorded_at", desc=True)\
-            .limit(1)\
-            .execute()
-        
-        metrics = metrics_result.data[0] if metrics_result.data else {}
+        metricas_json = modelo.get('metricas', {})
+        feature_importance = modelo.get('feature_importance', {})
         
         # Calcular participación estimada (basada en accuracy)
-        accuracy = metrics.get('accuracy', 0.7)
+        accuracy = metricas_json.get('accuracy', 0.7)
         participacion_estimada = f"{accuracy * 100:.1f}%"
-        
-        # Feature importance
-        feature_importance = {}
-        if metrics.get('feature_importance'):
-            import json
-            try:
-                feature_importance = json.loads(metrics['feature_importance'])
-            except:
-                feature_importance = {}
         
         return {
             "success": True,
             "tipo_eleccion": tipo_eleccion,
-            "modelo_activo": modelo.get('algorithm'),
+            "modelo_activo": modelo.get('algoritmo'),
             "model_name": modelo.get('model_name'),
             "model_id": modelo['id'],
-            "created_at": modelo['created_at'],
+            "created_at": modelo.get('created_at'),
+            "fecha_entrenamiento": modelo.get('fecha_entrenamiento'),
             "metricas": {
-                "accuracy": metrics.get('accuracy'),
-                "precision": metrics.get('precision_score'),
-                "recall": metrics.get('recall'),
-                "f1_score": metrics.get('f1_score')
+                "accuracy": metricas_json.get('accuracy'),
+                "precision": metricas_json.get('precision'),
+                "recall": metricas_json.get('recall'),
+                "f1_score": metricas_json.get('f1_score')
             },
             "participacion_estimada": participacion_estimada,
             "feature_importance": feature_importance,
-            "training_data_size": modelo.get('training_data_size')
+            "ruta_modelo": modelo.get('ruta_modelo')
         }
         
     except HTTPException:
