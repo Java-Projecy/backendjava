@@ -68,12 +68,12 @@ async def entrenar_modelo_electoral(tipo_eleccion: str):
             "modelo_activo": resultado.get("model_name"),
             "algorithm": resultado.get("algorithm"),
             "metricas": {
-                "accuracy": resultado["metrics"]["test_accuracy"],
+                "accuracy": resultado["metrics"]["accuracy"],
                 "precision": resultado["metrics"]["precision"],
                 "recall": resultado["metrics"]["recall"],
                 "f1_score": resultado["metrics"]["f1_score"],
             },
-            "participacion_estimada": f"{resultado['metrics']['test_accuracy'] * 100:.1f}%",
+            "participacion_estimada": f"{resultado['metrics']['accuracy'] * 100:.1f}%",
             "feature_importance": resultado["metrics"].get("feature_importance", {}),
             "training_time": resultado.get("training_time"),
             "samples": {
