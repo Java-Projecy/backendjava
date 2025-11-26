@@ -10,47 +10,187 @@ import re
 
 router = APIRouter()
 
+# app/routes/upload.py - REEMPLAZAR TODA LA CLASE CSVDetector
+
 class CSVDetector:
-    """Clase para detectar automáticamente el tipo de elección de un CSV"""
+    """
+    ✅ DETECTOR INTELIGENTE v2.0
     
-    KEYWORDS = {
-        'presidencial': [
-            'presidente', 'vicepresidente', 'nacional',
-            'presidencial', 'voto_presidencial', 'candidato_presidencial',
-            'presidente_id', 'vicepresidente_id', 'partido_nacional'
-        ],
-        'regional': [
-            'region', 'gobernador', 'regional',
-            'voto_regional', 'candidato_regional', 'provincia',
-            'gobernador_regional', 'consejo_regional', 'region_id'
-        ],
-        'distrital': [
-            'distrito', 'alcalde', 'distrital',
-            'voto_distrital', 'candidato_distrital', 'municipal',
-            'alcalde_distrital', 'regidor', 'concejo_municipal', 'distrito_id'
-        ]
-    }
+    Estrategia PRIORIZADA:
+    1. Si encuentra candidato_id (UUID) → Busca en BD (100% preciso)
+    2. Si no, analiza nombres de candidatos → Busca en BD
+    3. Si no, usa análisis de columnas y contenido
+    """
     
     @staticmethod
     def detectar_tipo(df: pd.DataFrame) -> str:
-        columns_lower = [col.lower().strip() for col in df.columns]
-        sample_content = df.head(5).to_string().lower()
+        """
+        Detecta el tipo de elección con múltiples estrategias
+        """
+        print("\n🔍 ========================================")
+        print("   INICIANDO DETECCIÓN DE TIPO DE ELECCIÓN")
+        print("========================================")
         
-        scores = {}
-        for tipo, keywords in CSVDetector.KEYWORDS.items():
-            column_matches = sum(1 for col in columns_lower if any(keyword in col for keyword in keywords))
-            content_matches = sum(1 for keyword in keywords if keyword in sample_content)
-            scores[tipo] = column_matches + content_matches
+        from app.config.settings import supabase_client
         
-        if max(scores.values()) == 0:
-            if 'region' in columns_lower or 'provincia' in columns_lower:
-                return 'regional'
-            elif 'distrito' in columns_lower or 'alcalde' in columns_lower:
-                return 'distrital'
-            else:
-                return 'presidencial'
+        # ====================================
+        # ESTRATEGIA 1: BUSCAR POR UUID (candidato_id)
+        # ====================================
+        print("\n🆔 Estrategia 1: Buscando por candidato_id (UUID)...")
         
-        return max(scores, key=scores.get)
+        # Detectar columna de candidato_id
+        candidato_id_col = None
+        for col in df.columns:
+            if col.lower().strip() in ['candidato_id', 'candidatoid', 'candidate_id']:
+                candidato_id_col = col
+                break
+        
+        if candidato_id_col:
+            print(f"   ✓ Columna UUID encontrada: '{candidato_id_col}'")
+            
+            # Obtener primer UUID válido
+            for idx, row in df.head(10).iterrows():  # Revisar primeras 10 filas
+                uuid_value = str(row[candidato_id_col]).strip()
+                
+                # Validar que parezca UUID (tiene guiones y longitud correcta)
+                if len(uuid_value) >= 30 and '-' in uuid_value:
+                    print(f"   → UUID detectado: {uuid_value}")
+                    
+                    try:
+                        # Buscar en BD
+                        result = supabase_client.table("candidatos")\
+                            .select("tipo_eleccion, nombre")\
+                            .eq("id", uuid_value.lower())\
+                            .execute()
+                        
+                        if result.data and len(result.data) > 0:
+                            tipo_detectado = result.data[0]['tipo_eleccion'].lower().strip()
+                            nombre_candidato = result.data[0]['nombre']
+                            
+                            print(f"   ✅ CANDIDATO ENCONTRADO EN BD:")
+                            print(f"      - Nombre: {nombre_candidato}")
+                            print(f"      - Tipo: {tipo_detectado.upper()}")
+                            print(f"\n✅ DETECCIÓN EXITOSA POR UUID")
+                            print("========================================\n")
+                            
+                            return tipo_detectado
+                        else:
+                            print(f"   ⚠️ UUID no encontrado en BD: {uuid_value}")
+                    
+                    except Exception as e:
+                        print(f"   ⚠️ Error buscando UUID: {e}")
+                        continue
+            
+            print("   ⚠️ No se encontraron UUIDs válidos en candidato_id")
+        else:
+            print("   ⚠️ Columna 'candidato_id' no encontrada")
+        
+        # ====================================
+        # ESTRATEGIA 2: BUSCAR POR NOMBRE DE CANDIDATO
+        # ====================================
+        print("\n👤 Estrategia 2: Buscando por nombre de candidato...")
+        
+        # Detectar columna de nombre de candidato
+        candidato_nombre_col = None
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if col_lower in ['candidato_nombre', 'candidato nombre', 'nombre_candidato', 
+                            'candidato', 'nombre candidato', 'candidate_name']:
+                candidato_nombre_col = col
+                break
+        
+        if candidato_nombre_col:
+            print(f"   ✓ Columna nombre encontrada: '{candidato_nombre_col}'")
+            
+            # Obtener primeros 5 nombres únicos
+            nombres_unicos = df[candidato_nombre_col].dropna().unique()[:5]
+            print(f"   → Nombres a buscar: {list(nombres_unicos)}")
+            
+            for nombre in nombres_unicos:
+                nombre_str = str(nombre).strip()
+                
+                # Saltar si es UUID (no es nombre)
+                if len(nombre_str) >= 30 and '-' in nombre_str:
+                    continue
+                
+                if len(nombre_str) < 3:
+                    continue
+                
+                try:
+                    # Buscar en BD por nombre (fuzzy match)
+                    result = supabase_client.table("candidatos")\
+                        .select("tipo_eleccion, nombre")\
+                        .ilike("nombre", f"%{nombre_str}%")\
+                        .limit(1)\
+                        .execute()
+                    
+                    if result.data and len(result.data) > 0:
+                        tipo_detectado = result.data[0]['tipo_eleccion'].lower().strip()
+                        nombre_completo = result.data[0]['nombre']
+                        
+                        print(f"   ✅ CANDIDATO ENCONTRADO:")
+                        print(f"      - Buscado: {nombre_str}")
+                        print(f"      - Encontrado: {nombre_completo}")
+                        print(f"      - Tipo: {tipo_detectado.upper()}")
+                        print(f"\n✅ DETECCIÓN EXITOSA POR NOMBRE")
+                        print("========================================\n")
+                        
+                        return tipo_detectado
+                
+                except Exception as e:
+                    print(f"   ⚠️ Error buscando '{nombre_str}': {e}")
+                    continue
+            
+            print("   ⚠️ Ningún nombre encontrado en BD")
+        else:
+            print("   ⚠️ Columna de nombre de candidato no encontrada")
+        
+        # ====================================
+        # ESTRATEGIA 3: ANÁLISIS DE CONTENIDO (FALLBACK)
+        # ====================================
+        print("\n📝 Estrategia 3: Análisis de contenido (fallback)...")
+        
+        keywords = {
+            'presidencial': ['presidente', 'presidencial', 'vicepresidente', 'nacional'],
+            'regional': ['gobernador', 'regional', 'region', 'provincia'],
+            'distrital': ['alcalde', 'distrital', 'municipal', 'distrito']
+        }
+        
+        scores = {'presidencial': 0, 'regional': 0, 'distrital': 0}
+        
+        # Analizar columnas
+        columns_text = ' '.join(df.columns).lower()
+        for tipo, words in keywords.items():
+            for word in words:
+                if word in columns_text:
+                    scores[tipo] += 5
+                    print(f"   → '{word}' en columnas (+5 {tipo})")
+        
+        # Analizar contenido (primeras 10 filas)
+        sample_content = df.head(10).to_string().lower()
+        for tipo, words in keywords.items():
+            for word in words:
+                count = sample_content.count(word)
+                if count > 0:
+                    scores[tipo] += count * 2
+                    print(f"   → '{word}' en contenido x{count} (+{count*2} {tipo})")
+        
+        print(f"\n📊 Scores: {scores}")
+        
+        if max(scores.values()) > 0:
+            tipo_detectado = max(scores, key=scores.get)
+            print(f"\n⚠️ DETECCIÓN POR FALLBACK: {tipo_detectado.upper()}")
+            print("========================================\n")
+            return tipo_detectado
+        
+        # ====================================
+        # ESTRATEGIA 4: DEFAULT (último recurso)
+        # ====================================
+        print("\n⚠️ NO SE PUDO DETECTAR AUTOMÁTICAMENTE")
+        print("   Usando tipo por defecto: PRESIDENCIAL")
+        print("========================================\n")
+        
+        return 'presidencial'  # Default seguro
 
 
 class CSVProcessor:
@@ -253,8 +393,189 @@ async def get_batch_data(batch_id: str, tipo: str) -> Dict:
 
 
 # app/routes/upload.py - REEMPLAZAR el endpoint existente
+@router.post("/batch/{batch_id}/move-to-final-replace")
+async def move_batch_replace_all(batch_id: str) -> Dict:
+    """
+    ✅ MODO 1: REEMPLAZAR TODO
+    
+    1. BORRA todos los votos de la tabla final
+    2. Migra datos limpios del batch
+    """
+    try:
+        # 1️⃣ Obtener info del batch
+        batch_info = supabase_client.table("log_limpieza_datos")\
+            .select("*")\
+            .eq("batch_id", batch_id)\
+            .single()\
+            .execute()
+        
+        if not batch_info.data:
+            raise HTTPException(status_code=404, detail="Batch no encontrado")
+        
+        tipo_eleccion = batch_info.data['tipo_eleccion']
+        tabla_temporal = f"datos_temp_{tipo_eleccion}es"
+        tabla_votos_final = f"votos_{tipo_eleccion}es"
+        
+        print(f"🗑️ REEMPLAZAR TODO: Limpiando tabla {tabla_votos_final}...")
+        
+        # 2️⃣ BORRAR TODA LA TABLA FINAL
+        supabase_client.table(tabla_votos_final)\
+            .delete()\
+            .neq("id", "00000000-0000-0000-0000-000000000000")\
+            .execute()
+        
+        print(f"✅ Tabla {tabla_votos_final} limpiada")
+        
+        # 3️⃣ Obtener datos limpios
+        datos_temp = supabase_client.table(tabla_temporal)\
+            .select("*")\
+            .eq("batch_id", batch_id)\
+            .in_("estado_registro", ["pendiente", "limpio"])\
+            .execute()
+        
+        if not datos_temp.data:
+            return {
+                "success": False, 
+                "message": "No hay registros limpios para migrar"
+            }
+        
+        print(f"📦 Migrando {len(datos_temp.data)} registros...")
+        
+        # 4️⃣ PROCESAR CADA REGISTRO (mismo código de antes)
+        votantes_creados = 0
+        votos_registrados = 0
+        errores = []
+        
+        for idx, registro in enumerate(datos_temp.data, 1):
+            try:
+                # A. CREAR/OBTENER VOTANTE
+                dni = registro['dni']
+                if not dni or len(dni) != 8:
+                    errores.append(f"DNI inválido: {dni}")
+                    continue
+                
+                votante_existe = supabase_client.table("votantes")\
+                    .select("id")\
+                    .eq("dni", dni)\
+                    .execute()
+                
+                if votante_existe.data:
+                    votante_id = votante_existe.data[0]['id']
+                else:
+                    nombre_partes = registro['nombre_completo'].split()
+                    votante_nuevo = supabase_client.table("votantes").insert({
+                        "dni": dni,
+                        "nombres": nombre_partes[0] if len(nombre_partes) > 0 else "Sin nombre",
+                        "apellido_paterno": nombre_partes[1] if len(nombre_partes) > 1 else "Sin apellido",
+                        "apellido_materno": nombre_partes[2] if len(nombre_partes) > 2 else "",
+                        "departamento": registro.get('departamento', 'LIMA'),
+                        "provincia": registro.get('provincia', 'LIMA'),
+                        "distrito": registro.get('distrito', 'LIMA'),
+                        "direccion": registro.get('direccion'),
+                        "telefono": registro.get('telefono'),
+                        "email": registro.get('email'),
+                        "estado": "Activo"
+                    }).execute()
+                    
+                    votante_id = votante_nuevo.data[0]['id']
+                    votantes_creados += 1
+                
+                # B. OBTENER CANDIDATO POR UUID
+                candidato_id = None
+                candidato_uuid_raw = None
 
-@router.post("/batch/{batch_id}/move-to-final")
+                for campo in ['candidato_id', 'candidato_nombre']:
+                    if campo in registro and registro[campo]:
+                        valor = str(registro[campo]).strip()
+                        if len(valor) >= 30 and '-' in valor:
+                            candidato_uuid_raw = valor
+                            break
+
+                if candidato_uuid_raw:
+                    candidato_uuid = candidato_uuid_raw.lower()
+                    result = supabase_client.table("candidatos")\
+                        .select("id")\
+                        .eq("id", candidato_uuid)\
+                        .single()\
+                        .execute()
+                    
+                    if result.data:
+                        candidato_id = result.data['id']
+
+                if not candidato_id:
+                    errores.append(f"Candidato no encontrado: {candidato_uuid_raw}")
+                    continue
+                
+                # C. INSERTAR VOTO (sin verificar duplicados)
+                supabase_client.table(tabla_votos_final).insert({
+                    "votante_id": votante_id,
+                    "candidato_id": candidato_id,
+                    "dni_votante": dni,
+                    "departamento": registro.get('departamento', 'LIMA'),
+                    "provincia": registro.get('provincia', 'LIMA'),
+                    "distrito": registro.get('distrito', 'LIMA'),
+                    "fecha_voto": registro.get('fecha_voto', datetime.utcnow().isoformat())
+                }).execute()
+                
+                votos_registrados += 1
+                
+                # Marcar como procesado
+                supabase_client.table(tabla_temporal)\
+                    .update({"estado_registro": "procesado"})\
+                    .eq("id", registro['id'])\
+                    .execute()
+                
+            except Exception as e:
+                error_msg = f"Error en registro {idx}: {str(e)}"
+                print(f"   ❌ {error_msg}")
+                errores.append(error_msg)
+                continue
+        
+        # 5️⃣ Actualizar estado del batch
+        supabase_client.table("log_limpieza_datos")\
+            .update({
+                "estado": "procesado",
+                "fecha_fin": datetime.utcnow().isoformat(),
+                "detalles": {
+                    "votantes_creados": votantes_creados,
+                    "votos_registrados": votos_registrados,
+                    "errores": len(errores),
+                    "modo": "REEMPLAZAR_TODO"
+                }
+            })\
+            .eq("batch_id", batch_id)\
+            .execute()
+        
+        print("\n" + "="*60)
+        print(f"✅ REEMPLAZO COMPLETADO")
+        print(f"   🗑️ Tabla limpiada: {tabla_votos_final}")
+        print(f"   📊 Votantes creados: {votantes_creados}")
+        print(f"   📊 Votos registrados: {votos_registrados}")
+        print(f"   ⚠️ Errores: {len(errores)}")
+        print("="*60)
+        
+        return {
+            "success": True,
+            "message": f"✅ Datos REEMPLAZADOS en {tabla_votos_final}",
+            "modo": "REEMPLAZAR_TODO",
+            "estadisticas": {
+                "tabla_limpiada": tabla_votos_final,
+                "votantes_creados": votantes_creados,
+                "votos_registrados": votos_registrados,
+                "total_procesado": len(datos_temp.data),
+                "errores": len(errores),
+                "errores_detalle": errores[:10] if errores else []
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error en reemplazo: {str(e)}")
+
+@router.post("/batch/{batch_id}/move-to-final-append")
 async def move_batch_to_final(batch_id: str, replace_all: bool = False) -> Dict:
     """
     ✅ MIGRA DATOS LIMPIOS de tablas temporales a tablas finales
