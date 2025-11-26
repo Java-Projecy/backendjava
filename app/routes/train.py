@@ -12,6 +12,7 @@ class TrainModelRequest(BaseModel):
     algorithm: str   # "random_forest", "logistic_regression", "gradient_boosting"
     test_size: float = 0.2
     random_state: int = 42
+    election_type: Optional[str] = None  # "presidencial", "regional", "distrital"
 
 
 @router.post("/train")

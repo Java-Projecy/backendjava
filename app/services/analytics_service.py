@@ -20,13 +20,28 @@ class AnalyticsService:
     async def get_overview() -> Dict:
         """KPIs generales del sistema"""
         try:
-            # Cargar datos
-            voters_result = supabase_client.table("voters").select("*").execute()
-            votes_result = supabase_client.table("votes").select("*").execute()
-            candidates_result = supabase_client.table("candidates").select("*").execute()
+            # Cargar datos de tablas reales
+            voters_result = supabase_client.table("votantes").select("*").execute()
+            
+            # Combinar votos de las 3 tablas
+            votos_pres = supabase_client.table("votos_presidenciales").select("*").execute()
+            votos_reg = supabase_client.table("votos_regionales").select("*").execute()
+            votos_dist = supabase_client.table("votos_distritales").select("*").execute()
+            
+            candidates_result = supabase_client.table("candidatos").select("*").execute()
             
             df_voters = pd.DataFrame(voters_result.data)
-            df_votes = pd.DataFrame(votes_result.data)
+            
+            # Combinar todos los votos
+            all_votes = []
+            if votos_pres.data:
+                all_votes.extend(votos_pres.data)
+            if votos_reg.data:
+                all_votes.extend(votos_reg.data)
+            if votos_dist.data:
+                all_votes.extend(votos_dist.data)
+            
+            df_votes = pd.DataFrame(all_votes)
             df_candidates = pd.DataFrame(candidates_result.data)
             
             # KPIs
@@ -35,30 +50,27 @@ class AnalyticsService:
             total_candidates = len(df_candidates)
             participation_rate = (total_votes / total_voters * 100) if total_voters > 0 else 0
             
-            # Distribución por género
-            gender_dist = df_voters['genero'].value_counts().to_dict() if 'genero' in df_voters.columns else {}
+            # Distribución por departamento
+            dept_dist = df_voters['departamento'].value_counts().to_dict() if 'departamento' in df_voters.columns else {}
             
-            # Distribución por educación
-            edu_dist = df_voters['educacion'].value_counts().to_dict() if 'educacion' in df_voters.columns else {}
-            
-            # Departamentos con más votos
-            df_merged = pd.merge(df_votes, df_voters, left_on='voter_id', right_on='id', how='left')
+            # Top departamentos con más votos
+            df_merged = pd.merge(df_votes, df_voters, left_on='dni_votante', right_on='dni', how='left')
             top_departments = df_merged['departamento'].value_counts().head(5).to_dict() if 'departamento' in df_merged.columns else {}
             
             return {
                 "success": True,
                 "timestamp": datetime.utcnow().isoformat(),
-                "kpis": {
-                    "total_voters": total_voters,
-                    "total_votes": total_votes,
-                    "total_candidates": total_candidates,
-                    "participation_rate": round(participation_rate, 2),
-                    "avg_age": float(df_voters['edad'].mean()) if 'edad' in df_voters.columns else 0
-                },
-                "distributions": {
-                    "gender": gender_dist,
-                    "education": edu_dist,
-                    "top_departments": top_departments
+                "data": {
+                    "kpis": {
+                        "total_voters": total_voters,
+                        "total_votes": total_votes,
+                        "total_candidates": total_candidates,
+                        "participation_rate": round(participation_rate, 2)
+                    },
+                    "distributions": {
+                        "departments": dept_dist,
+                        "top_departments": top_departments
+                    }
                 }
             }
         
@@ -69,47 +81,46 @@ class AnalyticsService:
     
     @staticmethod
     async def get_demographic_analysis() -> Dict:
-        """Análisis demográfico detallado"""
+        """Análisis geográfico detallado (en lugar de demográfico)"""
         try:
-            votes_result = supabase_client.table("votes").select("*").execute()
-            voters_result = supabase_client.table("voters").select("*").execute()
+            # Combinar votos de las 3 tablas
+            votos_pres = supabase_client.table("votos_presidenciales").select("*").execute()
+            votos_reg = supabase_client.table("votos_regionales").select("*").execute()
+            votos_dist = supabase_client.table("votos_distritales").select("*").execute()
             
-            df_votes = pd.DataFrame(votes_result.data)
+            voters_result = supabase_client.table("votantes").select("*").execute()
+            
+            all_votes = []
+            if votos_pres.data:
+                all_votes.extend(votos_pres.data)
+            if votos_reg.data:
+                all_votes.extend(votos_reg.data)
+            if votos_dist.data:
+                all_votes.extend(votos_dist.data)
+            
+            df_votes = pd.DataFrame(all_votes)
             df_voters = pd.DataFrame(voters_result.data)
             
-            df = pd.merge(df_votes, df_voters, left_on='voter_id', right_on='id', how='left')
+            df = pd.merge(df_votes, df_voters, left_on='dni_votante', right_on='dni', how='left')
             
-            # Análisis por edad
-            df['edad_grupo'] = pd.cut(
-                df['edad'],
-                bins=[18, 25, 35, 50, 65, 120],
-                labels=['18-25', '26-35', '36-50', '51-65', '65+']
-            )
-            age_analysis = df.groupby('edad_grupo')['candidate_id'].value_counts().unstack(fill_value=0).to_dict()
+            # Análisis por departamento
+            dept_analysis = df.groupby('departamento')['candidato_id'].value_counts().unstack(fill_value=0).to_dict()
             
-            # Análisis por género
-            gender_analysis = df.groupby('genero')['candidate_id'].value_counts().unstack(fill_value=0).to_dict()
+            # Análisis por provincia (top 10)
+            prov_analysis = df.groupby('provincia')['candidato_id'].value_counts().unstack(fill_value=0).to_dict()
             
-            # Análisis por educación
-            education_analysis = df.groupby('educacion')['candidate_id'].value_counts().unstack(fill_value=0).to_dict()
-            
-            # Estadísticas generales
-            age_stats = {
-                "mean": float(df['edad'].mean()),
-                "median": float(df['edad'].median()),
-                "std": float(df['edad'].std()),
-                "min": int(df['edad'].min()),
-                "max": int(df['edad'].max())
-            }
+            # Análisis por distrito (top 10)
+            dist_analysis = df.groupby('distrito')['candidato_id'].value_counts().unstack(fill_value=0).to_dict()
             
             return {
                 "success": True,
                 "timestamp": datetime.utcnow().isoformat(),
-                "age_analysis": age_analysis,
-                "gender_analysis": gender_analysis,
-                "education_analysis": education_analysis,
-                "age_statistics": age_stats,
-                "total_analyzed": len(df)
+                "data": {
+                    "department_analysis": dept_analysis,
+                    "province_analysis": prov_analysis,
+                    "district_analysis": dist_analysis,
+                    "total_analyzed": len(df)
+                }
             }
         
         except Exception as e:

@@ -4,6 +4,83 @@ from app.config.settings import supabase_client
 
 router = APIRouter()
 
+@router.get("/dashboard")
+async def get_dashboard_stats():
+    """Obtiene todas las estadísticas para el dashboard"""
+    try:
+        # Total votantes
+        votantes = supabase_client.table("votantes").select("id", count="exact").execute()
+        
+        # Total votos por tipo
+        votos_pres = supabase_client.table("votos_presidenciales").select("id", count="exact").execute()
+        votos_reg = supabase_client.table("votos_regionales").select("id", count="exact").execute()
+        votos_dist = supabase_client.table("votos_distritales").select("id", count="exact").execute()
+        
+        total_votos = votos_pres.count + votos_reg.count + votos_dist.count
+        
+        # Calcular porcentaje de datos procesados
+        datos_procesados = (total_votos / max(votantes.count, 1)) * 100 if votantes.count > 0 else 0
+        
+        # Actividad reciente (últimos 5 registros de votos)
+        actividad_pres = supabase_client.table("votos_presidenciales") \
+            .select("*, votantes(nombres, apellido_paterno, apellido_materno)") \
+            .order("fecha_voto", desc=True) \
+            .limit(2) \
+            .execute()
+        
+        actividad_reg = supabase_client.table("votos_regionales") \
+            .select("*, votantes(nombres, apellido_paterno, apellido_materno)") \
+            .order("fecha_voto", desc=True) \
+            .limit(2) \
+            .execute()
+        
+        actividad_dist = supabase_client.table("votos_distritales") \
+            .select("*, votantes(nombres, apellido_paterno, apellido_materno)") \
+            .order("fecha_voto", desc=True) \
+            .limit(1) \
+            .execute()
+        
+        # Combinar actividad
+        actividad = []
+        for voto in actividad_pres.data:
+            actividad.append({
+                "action": "Voto Presidencial registrado",
+                "time": voto.get("fecha_voto", ""),
+                "status": "success"
+            })
+        for voto in actividad_reg.data:
+            actividad.append({
+                "action": "Voto Regional registrado",
+                "time": voto.get("fecha_voto", ""),
+                "status": "success"
+            })
+        for voto in actividad_dist.data:
+            actividad.append({
+                "action": "Voto Distrital registrado",
+                "time": voto.get("fecha_voto", ""),
+                "status": "success"
+            })
+        
+        return {
+            "success": True,
+            "data": {
+                "total_votantes": votantes.count,
+                "registros_cargados": total_votos,
+                "datos_procesados": round(datos_procesados, 1),
+                "validacion_completa": total_votos,
+                "votos": {
+                    "presidencial": votos_pres.count,
+                    "regional": votos_reg.count,
+                    "distrital": votos_dist.count,
+                    "total": total_votos
+                },
+                "actividad_reciente": actividad[:5]
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/general")
 async def get_estadisticas_generales():
     """Obtiene estadísticas generales"""

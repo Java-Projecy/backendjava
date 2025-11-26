@@ -40,6 +40,54 @@ class VotanteUpdate(BaseModel):
     estado: Optional[str] = None
 
 
+@router.get("/stats")
+async def get_votantes_stats():
+    """Obtiene estadísticas de votantes"""
+    try:
+        # Total votantes
+        total = supabase_client.table("votantes").select("id", count="exact").execute()
+        
+        # Votantes por estado
+        activos = supabase_client.table("votantes") \
+            .select("id", count="exact") \
+            .eq("estado", "Activo") \
+            .execute()
+        
+        # Registros de hoy, esta semana, este mes
+        from datetime import datetime, timedelta
+        hoy = datetime.now().date()
+        inicio_semana = hoy - timedelta(days=hoy.weekday())
+        inicio_mes = hoy.replace(day=1)
+        
+        hoy_count = supabase_client.table("votantes") \
+            .select("id", count="exact") \
+            .gte("created_at", hoy.isoformat()) \
+            .execute()
+        
+        semana_count = supabase_client.table("votantes") \
+            .select("id", count="exact") \
+            .gte("created_at", inicio_semana.isoformat()) \
+            .execute()
+        
+        mes_count = supabase_client.table("votantes") \
+            .select("id", count="exact") \
+            .gte("created_at", inicio_mes.isoformat()) \
+            .execute()
+        
+        return {
+            "success": True,
+            "data": {
+                "total": total.count,
+                "activos": activos.count,
+                "hoy": hoy_count.count,
+                "semana": semana_count.count,
+                "mes": mes_count.count
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("")
 async def get_all_votantes():
     """Obtiene todos los votantes"""

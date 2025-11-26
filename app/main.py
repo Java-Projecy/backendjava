@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
-from app.routes import candidatos, votantes, votos, estadisticas, upload
+from app.routes import candidatos, votantes, votos, estadisticas, upload, train, analytics, fraud
 
 settings = get_settings()
 
@@ -28,7 +28,10 @@ app.include_router(candidatos.router, prefix="/api/candidatos", tags=["Candidato
 app.include_router(votantes.router, prefix="/api/votantes", tags=["Votantes"])
 app.include_router(votos.router, prefix="/api/votos", tags=["Votos"])
 app.include_router(estadisticas.router, prefix="/api/estadisticas", tags=["Estadísticas"])
-app.include_router(upload.router, prefix="/api/upload", tags=["Upload CSV"])  # ← NUEVA RUTA
+app.include_router(upload.router, prefix="/api/upload", tags=["Upload CSV"])
+app.include_router(train.router, prefix="/api/train", tags=["ML Training"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
+app.include_router(fraud.router, prefix="/api", tags=["Fraud Detection"])  # ← NUEVA RUTA
 
 @app.get("/")
 async def root():
