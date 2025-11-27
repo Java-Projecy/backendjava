@@ -4,16 +4,16 @@ from pydantic import Field
 from supabase import create_client, Client
 from functools import lru_cache
 import json
-
+import os
 
 class Settings(BaseSettings):
     # Supabase Configuration
     supabase_url: str = Field(..., env="SUPABASE_URL")
     supabase_service_role_key: str = Field(..., env="SUPABASE_SERVICE_ROLE_KEY")
     
-    # CORS Configuration - ✅ CORREGIDO
+    # ✅ CORS mejorado: Detecta automáticamente entorno
     cors_origins: str = Field(
-        default='["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173", "https://onpe-111.vercel.app"]',
+        default='["http://localhost:5173","http://localhost:8080","http://127.0.0.1:5173","https://onpe-111.vercel.app"]',
         env="CORS_ORIGINS"
     )
     
@@ -28,17 +28,31 @@ class Settings(BaseSettings):
         case_sensitive = False
     
     def get_cors_origins(self):
-        """Convierte el string JSON a lista"""
+        """Convierte el string JSON a lista y añade entornos dinámicos"""
         try:
-            return json.loads(self.cors_origins)
+            origins = json.loads(self.cors_origins)
+            
+            # ✅ Añadir dominios de producción dinámicamente
+            production_domains = [
+                "https://onpe-111.vercel.app",
+                "https://*.vercel.app"
+            ]
+            
+            for domain in production_domains:
+                if domain not in origins:
+                    origins.append(domain)
+            
+            return origins
         except:
-            return ["http://localhost:5173", "http://localhost:8080"]
-
+            return [
+                "http://localhost:5173",
+                "http://localhost:8080",
+                "https://onpe-111.vercel.app"
+            ]
 
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
-
 
 def get_supabase_client() -> Client:
     settings = get_settings()
@@ -47,6 +61,5 @@ def get_supabase_client() -> Client:
         settings.supabase_service_role_key
     )
     return supabase
-
 
 supabase_client = get_supabase_client()

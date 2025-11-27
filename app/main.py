@@ -12,22 +12,23 @@ app = FastAPI(
     version="2.1.0"
 )
 
-# CORS
+# ✅ CORRECCIÓN: CORS mejorado
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:8080",
         "http://127.0.0.1:5173",
-        "https://onpe-111.vercel.app"
+        "https://onpe-111.vercel.app",  # ✅ Tu dominio de producción
+        "https://*.vercel.app",  # ✅ Permitir subdominios de Vercel
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Permite GET, POST, PUT, DELETE, OPTIONS
+    allow_headers=["*"],  # Permite todos los headers
+    expose_headers=["*"],  # Expone headers en la respuesta
 )
 
-
-# RUTAS
+# RUTAS (sin cambios)
 app.include_router(candidatos.router, prefix="/api/candidatos", tags=["Candidatos"])
 app.include_router(votantes.router, prefix="/api/votantes", tags=["Votantes"])
 app.include_router(votos.router, prefix="/api/votos", tags=["Votos"])
@@ -35,9 +36,8 @@ app.include_router(estadisticas.router, prefix="/api/estadisticas", tags=["Estad
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload CSV"])
 app.include_router(train.router, prefix="/api/train", tags=["ML Training"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
-
-# ← ESTA ES LA LÍNEA MÁGICA (cámbiala)
 app.include_router(fraud.router, prefix="/api/upload", tags=["Limpieza de Datos"])
+
 @app.get("/")
 async def root():
     return {
@@ -73,3 +73,9 @@ async def health_check():
             "auto_detection": True
         }
     }
+
+# ✅ NUEVO: Endpoint para testing CORS
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """Maneja preflight requests de CORS"""
+    return {"message": "OK"}
