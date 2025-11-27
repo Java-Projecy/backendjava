@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # CORS Configuration - ✅ CORREGIDO
     cors_origins: str = Field(
-        default='["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173", "https://easy-vote-portal.vercel.app"]',
+        default='["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173", "https://onpe-111.vercel.app"]',
         env="CORS_ORIGINS"
     )
     
