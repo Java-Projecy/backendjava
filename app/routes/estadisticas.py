@@ -113,8 +113,103 @@ async def get_estadisticas_generales():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
+@router.get("/votos-por-distrito")
+async def get_votos_por_distrito():
+    """Obtiene votos agrupados por distrito"""
+    try:
+        # Combinar votos de las 3 tablas
+        votos_pres = supabase_client.table("votos_presidenciales").select("distrito").execute()
+        votos_reg = supabase_client.table("votos_regionales").select("distrito").execute()
+        votos_dist = supabase_client.table("votos_distritales").select("distrito").execute()
+        
+        # Combinar todos los votos
+        all_votes = []
+        if votos_pres.data:
+            all_votes.extend(votos_pres.data)
+        if votos_reg.data:
+            all_votes.extend(votos_reg.data)
+        if votos_dist.data:
+            all_votes.extend(votos_dist.data)
+        
+        # Contar votos por distrito
+        distrito_counts = {}
+        for voto in all_votes:
+            distrito = voto.get('distrito', 'Sin distrito')
+            if distrito:
+                distrito_counts[distrito] = distrito_counts.get(distrito, 0) + 1
+        
+        # Convertir a lista ordenada
+        distritos_data = [
+            {"distrito": distrito, "votos": count}
+            for distrito, count in distrito_counts.items()
+        ]
+        
+        # Ordenar por cantidad de votos (mayor a menor)
+        distritos_data.sort(key=lambda x: x['votos'], reverse=True)
+        
+        return {
+            "success": True,
+            "data": distritos_data,
+            "total_distritos": len(distritos_data)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/votos-por-distrito/{tipo_eleccion}")
+async def get_votos_por_distrito_filtrado(tipo_eleccion: str):
+    """Obtiene votos por distrito filtrados por tipo de elección"""
+    if tipo_eleccion not in ['presidencial', 'regional', 'distrital', 'todos']:
+        raise HTTPException(
+            status_code=400,
+            detail="tipo_eleccion debe ser: presidencial, regional, distrital o todos"
+        )
+    
+    try:
+        all_votes = []
+        
+        # Si es "todos", combinar todas las tablas
+        if tipo_eleccion == 'todos':
+            votos_pres = supabase_client.table("votos_presidenciales").select("distrito").execute()
+            votos_reg = supabase_client.table("votos_regionales").select("distrito").execute()
+            votos_dist = supabase_client.table("votos_distritales").select("distrito").execute()
+            
+            if votos_pres.data:
+                all_votes.extend(votos_pres.data)
+            if votos_reg.data:
+                all_votes.extend(votos_reg.data)
+            if votos_dist.data:
+                all_votes.extend(votos_dist.data)
+        else:
+            # Solo una tabla específica
+            tabla = f"votos_{tipo_eleccion}es"
+            votos = supabase_client.table(tabla).select("distrito").execute()
+            if votos.data:
+                all_votes.extend(votos.data)
+        
+        # Contar votos por distrito
+        distrito_counts = {}
+        for voto in all_votes:
+            distrito = voto.get('distrito', 'Sin distrito')
+            if distrito and distrito.strip():
+                distrito_counts[distrito] = distrito_counts.get(distrito, 0) + 1
+        
+        # Convertir a lista ordenada
+        distritos_data = [
+            {"distrito": distrito, "votos": count}
+            for distrito, count in distrito_counts.items()
+        ]
+        
+        distritos_data.sort(key=lambda x: x['votos'], reverse=True)
+        
+        return {
+            "success": True,
+            "tipo_eleccion": tipo_eleccion,
+            "data": distritos_data,
+            "total_distritos": len(distritos_data),
+            "total_votos": sum(d['votos'] for d in distritos_data)
+        }
+    except Exception as e:
+        print(f"❌ Error en votos-por-distrito/{tipo_eleccion}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 @router.get("/{tipo_eleccion}")
 async def get_estadisticas_por_tipo(tipo_eleccion: str):
     """Obtiene estadísticas por tipo de elección"""
